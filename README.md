@@ -35,13 +35,19 @@ repositório (só o serviço principal `network-optimizer`, sem o sidecar de spe
 ```bash
 docker run -d --name network-optimizer \
   -e TZ=Europe/Lisbon \
-  -e APP_PASSWORD=<password> \
+  -e HOST_IP=192.168.2.224 \
+  -e Iperf3Server__Enabled=true \
   -p 8042:8042 \
+  -p 5201:5201 -p 5201:5201/udp \
   -v /opt/networkoptimizer/data:/app/data \
   -v /opt/networkoptimizer/logs:/app/logs \
   --restart=unless-stopped \
   ghcr.io/ozark-connect/network-optimizer:latest
 ```
+
+(`APP_PASSWORD` só é necessária na primeira criação — o admin já fica gravado em `/app/data`; recriações
+seguintes do container não precisam de a repassar. Comando acima já inclui `Iperf3Server__Enabled` e a
+porta 5201, ver secção "Testes de velocidade LAN" abaixo.)
 
 ## Ligação ao UniFi
 
@@ -82,6 +88,34 @@ o "Gateway SSH" foi configurado com utilizador `root` + essa password (não a ch
 para dispositivos) — é a combinação que o próprio painel do NetworkOptimizer indica para gateways
 UDM/UCG/UDR. "Test SSH Connection" confirmou sucesso.
 
+## Testes de velocidade LAN (iperf3 + OpenSpeedTest, 2026-09-17)
+
+Dois testes "de qualquer dispositivo" ativados, conforme a própria página `/speedtest` do
+NetworkOptimizer descreve:
+
+- **Browser Speed Test (OpenSpeedTest):** container sidecar dedicado
+  `ghcr.io/ozark-connect/speedtest:latest` (fork customizado do OpenSpeedTest que envia os
+  resultados automaticamente para o NetworkOptimizer), a correr em `http://192.168.2.224:3005`.
+  Qualquer dispositivo na LAN abre a página e clica "Start" — o resultado aparece no "Test History"
+  do painel principal, identificado pelo IP de origem e associado ao cliente UniFi correspondente.
+  ```bash
+  docker run -d --name network-optimizer-speedtest \
+    -e TZ=Europe/Lisbon -e HOST_IP=192.168.2.224 -e OPENSPEEDTEST_PORT=3005 \
+    -p 3005:3000 --restart=unless-stopped \
+    --sysctl net.ipv4.tcp_rmem="4096 131072 33554432" \
+    --sysctl net.ipv4.tcp_wmem="4096 65536 33554432" \
+    --sysctl net.ipv4.tcp_mtu_probing=1 \
+    ghcr.io/ozark-connect/speedtest:latest
+  ```
+  Testado com sucesso via browser: **947.3 Mbps download / 949.3 Mbps upload / 1ms ping / 0.1ms jitter**.
+
+- **iperf3 to Server:** não é um container à parte — o próprio binário `network-optimizer` tem um
+  servidor iperf3 embutido, ativado com `Iperf3Server__Enabled=true` e a porta 5201 (TCP+UDP)
+  publicada (ver `docker run` acima). Testado a partir deste PC Windows (`winget install
+  ar51an.iPerf3`, `iperf3 -c 192.168.2.224 -p 5201`): **~937 Mbits/sec**, resultado também gravado
+  no "Test History" (dispositivo `OLIVEIRA`, 935.0 Mbps, 8s, associado ao caminho de switches real:
+  Escritório → US 8 150W → US 24 → Garagem).
+
 ## InfluxDB (monitorização de séries temporais)
 
 O NetworkOptimizer pedia uma instância própria de InfluxDB para guardar métricas (contadores de
@@ -108,6 +142,20 @@ da rede LAN gerida pelo UniFi. Secção "Monitoring Interfaces" do NetworkOptimi
 agora; as estatísticas óticas/SFP diretas do modem ficam por adicionar se/quando o utilizador
 confirmar o IP de gestão físico do aparelho.
 
+## Adaptive SQM (configurado, deployment por fazer)
+
+Pré-requisito "Smart Queues Required" resolvido: ativado em `Settings → Internet → MEO → Advanced →
+Smart Queues` no UniFi, com Downrate/Uprate 500/100 Mbps (velocidade real da linha). **Trade-off
+conhecido e aceite:** com o SQM ativo, o throughput caiu de ~516/120 Mbps para ~380/84 Mbps — o SQM
+clássico da UDM Pro corre em software (fq_codel/cake, CPU-bound), limitação de hardware conhecida em
+linhas rápidas. Decisão do utilizador: manter ativo, aceitar a perda em troca de latência mais
+estável sob carga.
+
+O painel `/sqm` do NetworkOptimizer foi preenchido (MEO, DOCSIS Cable, 500/100 Mbps nominal, "Enable
+Adaptive SQM") mas **o deploy não foi feito** — esse painel só grava a configuração no momento de
+"Deploy SQM Scripts" (não há guardar rascunho), que instala scripts + cron jobs no próprio gateway
+para shaping ativo em tempo real. Fica pendente de decisão do utilizador.
+
 ## Estado (2026-09-17)
 
 - ✅ LXC criada, Docker instalado, container saudável
@@ -116,7 +164,10 @@ confirmar o IP de gestão físico do aparelho.
 - ✅ Auditoria de segurança inicial corrida (score 18/100, 130 achados) — levou a corrigir o
   isolamento real das VLANs R1-R7 e ativar DNS-over-HTTPS no UniFi (detalhe em
   [`HO_proxmox-pve`](https://github.com/holiveira84/HO_proxmox-pve) / vault, secção `unifi`)
-- ✅ SSH da gateway ligado (ver secção acima) — iperf3/Adaptive SQM/WAN speed test já utilizáveis
+- ✅ SSH da gateway ligado — iperf3/Adaptive SQM/WAN speed test desbloqueados
+- ✅ Testes de velocidade LAN (browser OpenSpeedTest + iperf3) ativados e testados com sucesso
+- ✅ Smart Queues (UniFi) ativado — pré-requisito do Adaptive SQM
+- ⏳ Adaptive SQM configurado na UI mas sem deploy (ver secção acima)
 - ⏳ Modem/ONT não configurado (IP de gestão não encontrado)
 - ⏳ IP ainda em DHCP (192.168.2.224) — decisão de fixar/avançar a sério fica pendente do
   utilizador após explorar o painel
