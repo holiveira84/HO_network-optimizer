@@ -55,10 +55,32 @@ Successfully authenticated with UniFi controller
 Retrieved system info - Controller: UDM Pro HOLIVEIRA v10.6.101
 ```
 
-**Nota de segurança:** acesso SSH à gateway é opcional no NetworkOptimizer, só necessário para
-funcionalidades que *alteram* configuração (WAN steering, Adaptive SQM para bufferbloat, speed
-test avançado). Decidido não ligar isso por agora — só a parte de leitura (auditoria, WiFi,
-monitorização) está ativa.
+## SSH da gateway (ligado em 2026-09-17)
+
+O NetworkOptimizer usa SSH à gateway só para funcionalidades que dependem de correr comandos nela
+(testes iperf3, Adaptive SQM para bufferbloat, WAN speed test) — não é necessário para auditoria,
+WiFi ou monitorização (essas usam só a API do controller). Inicialmente deixado por ligar; ativado
+depois a pedido explícito do utilizador.
+
+**Chave gerida:** usada a funcionalidade "Managed SSH Key" do próprio NetworkOptimizer (Settings →
+Connection) — gera um par de chaves Ed25519 dentro do próprio container; a chave privada nunca sai
+de lá, só a pública precisa de ser instalada no destino.
+
+**Causa raiz do "Connection refused" inicial:** o UDM Pro tem **dois toggles de SSH totalmente
+independentes**:
+- `mgmt.x_ssh_enabled` (API/app Network) — controla o SSH dos *dispositivos geridos*
+  (switches/APs), já estava ativo, usado pelo utilizador `home-assistant` existente.
+- **SSH da própria consola UniFi OS** — em `Settings → Control Plane → Console → SSH`, secção
+  separada da app Network, com o próprio utilizador `root` e password dedicada. Estava
+  **desligado**, e era isso que bloqueava a porta 22 por completo (testado com `nc`/`/dev/tcp` a
+  partir do host Proxmox e da própria LXC — "Connection refused" nos dois, confirmando que não era
+  problema de firewall/zona, mas o daemon SSH da consola mesmo por ligar).
+
+**Correção:** ativado o SSH da consola via a UI do UniFi (não há endpoint de API direto para isto),
+password nova definida (guardada no vault, `unifi.ssh_console_root_password`). No NetworkOptimizer,
+o "Gateway SSH" foi configurado com utilizador `root` + essa password (não a chave gerida, que é só
+para dispositivos) — é a combinação que o próprio painel do NetworkOptimizer indica para gateways
+UDM/UCG/UDR. "Test SSH Connection" confirmou sucesso.
 
 ## InfluxDB (monitorização de séries temporais)
 
@@ -86,12 +108,15 @@ da rede LAN gerida pelo UniFi. Secção "Monitoring Interfaces" do NetworkOptimi
 agora; as estatísticas óticas/SFP diretas do modem ficam por adicionar se/quando o utilizador
 confirmar o IP de gestão físico do aparelho.
 
-## Estado (2026-09-16)
+## Estado (2026-09-17)
 
 - ✅ LXC criada, Docker instalado, container saudável
 - ✅ Ligado ao UniFi (UDM Pro HOLIVEIRA v10.6.101) com conta local dedicada
 - ✅ InfluxDB configurado (buckets próprios criados pela app)
-- ⏳ Auditoria de segurança inicial ainda por correr
+- ✅ Auditoria de segurança inicial corrida (score 18/100, 130 achados) — levou a corrigir o
+  isolamento real das VLANs R1-R7 e ativar DNS-over-HTTPS no UniFi (detalhe em
+  [`HO_proxmox-pve`](https://github.com/holiveira84/HO_proxmox-pve) / vault, secção `unifi`)
+- ✅ SSH da gateway ligado (ver secção acima) — iperf3/Adaptive SQM/WAN speed test já utilizáveis
 - ⏳ Modem/ONT não configurado (IP de gestão não encontrado)
 - ⏳ IP ainda em DHCP (192.168.2.224) — decisão de fixar/avançar a sério fica pendente do
   utilizador após explorar o painel
