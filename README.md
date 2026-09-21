@@ -8,7 +8,9 @@ estatísticas de modem/ONT/SFP.
 Instalado em **2026-09-16** como teste (a pedido do utilizador, "para explorar o painel antes de
 decidir avançar") — sem qualquer alteração de rede feita remotamente; a ligação ao controller
 UniFi foi feita pelo próprio utilizador, com uma conta local dedicada criada por ele na consola
-UniFi.
+UniFi. **Promovido a produção em 2026-09-21** ("netoptimizer corre a serio") depois de toda a
+família de achados DNS + isolamento VLAN do audit ter sido corrigida a sério no UniFi (ver secção
+abaixo) — IP fixado por MAC (`bc:24:11:7c:84:94`), mesmo mecanismo usado em toda esta infraestrutura.
 
 ## Onde corre
 
@@ -16,7 +18,7 @@ LXC dedicada no Proxmox (`pve`, 192.168.2.112), **VMID 118**, Debian 12, Docker 
 (`nesting=1,keyctl=1`, unprivileged), disco **inteiramente no `tank1`** (não no SSD/`local-lvm` —
 política da casa: o SSD é só para o sistema Proxmox).
 
-- **Acesso:** http://192.168.2.224:8042 (LAN apenas)
+- **Acesso:** http://192.168.2.224:8042 (LAN apenas, IP fixo desde 2026-09-21)
 - **Imagem:** `ghcr.io/ozark-connect/network-optimizer:latest`
 - **Autenticação:** password fixa via variável de ambiente `APP_PASSWORD` (não o fluxo de password
   auto-gerada da instalação oficial)
@@ -202,8 +204,7 @@ secção `unifi` (`RESOLVIDO_dns_leak_prevention_2026-09-21`, `RESOLVIDO_dot_lea
   re-auditoria (2026-09-21, ver secção acima) — score 18→22/100, achados 130→104
 - ⛔ Smart Queues (UniFi) e Adaptive SQM — testados, depois abandonados (trade-off de throughput
   não valeu a pena para o utilizador, ver secção acima)
+- ✅ IP fixado por MAC (`192.168.2.224`) — promovido a produção
 - ⏳ Modem/ONT não configurado (IP de gestão não encontrado)
-- ⏳ IP ainda em DHCP (192.168.2.224) — decisão de fixar/avançar a sério fica pendente do
-  utilizador após explorar o painel
 - ⏳ Resto dos achados "Recommended" do audit (maioritariamente dispositivos IoT/câmara na VLAN
   errada) — não urgente
