@@ -142,32 +142,68 @@ da rede LAN gerida pelo UniFi. Secção "Monitoring Interfaces" do NetworkOptimi
 agora; as estatísticas óticas/SFP diretas do modem ficam por adicionar se/quando o utilizador
 confirmar o IP de gestão físico do aparelho.
 
-## Adaptive SQM (configurado, deployment por fazer)
+## Adaptive SQM (abandonado por agora)
 
-Pré-requisito "Smart Queues Required" resolvido: ativado em `Settings → Internet → MEO → Advanced →
-Smart Queues` no UniFi, com Downrate/Uprate 500/100 Mbps (velocidade real da linha). **Trade-off
-conhecido e aceite:** com o SQM ativo, o throughput caiu de ~516/120 Mbps para ~380/84 Mbps — o SQM
-clássico da UDM Pro corre em software (fq_codel/cake, CPU-bound), limitação de hardware conhecida em
-linhas rápidas. Decisão do utilizador: manter ativo, aceitar a perda em troca de latência mais
-estável sob carga.
+Pré-requisito "Smart Queues Required" foi resolvido em 2026-09-17: ativado em `Settings → Internet →
+MEO → Advanced → Smart Queues` no UniFi, com Downrate/Uprate 500/100 Mbps (velocidade real da
+linha). **Trade-off testado:** com o SQM ativo, o throughput caiu de ~516/120 Mbps para ~380/84 Mbps
+— o SQM clássico da UDM Pro corre em software (fq_codel/cake, CPU-bound), limitação de hardware
+conhecida em linhas rápidas.
 
-O painel `/sqm` do NetworkOptimizer foi preenchido (MEO, DOCSIS Cable, 500/100 Mbps nominal, "Enable
-Adaptive SQM") mas **o deploy não foi feito** — esse painel só grava a configuração no momento de
-"Deploy SQM Scripts" (não há guardar rascunho), que instala scripts + cron jobs no próprio gateway
-para shaping ativo em tempo real. Fica pendente de decisão do utilizador.
+O painel `/sqm` do NetworkOptimizer chegou a ser preenchido (MEO, DOCSIS Cable, 500/100 Mbps
+nominal, "Enable Adaptive SQM"), mas **o deploy nunca foi feito** — esse painel só grava a
+configuração no momento de "Deploy SQM Scripts" (não há guardar rascunho), por isso esse
+preenchimento perdeu-se. Pouco depois (2026-09-18), o utilizador **desativou o Smart Queues** no
+UniFi — prioridade final foi o throughput total, não a latência estável sob carga. Com isso, o
+pré-requisito do Adaptive SQM deixou de estar cumprido outra vez. Considerar este esforço fechado a
+menos que o utilizador peça para reativar.
 
-## Estado (2026-09-17)
+## Auditoria de segurança — resolução completa da família DNS + isolamento VLAN (2026-09-21)
+
+A partir dos achados da própria auditoria do NetworkOptimizer (`/audit`), corrigidos diretamente no
+UniFi via API (`X-API-KEY`, endpoints REST legado + v2 `firewall-policies`/`nat`). Cada fix foi
+verificado com testes reais (DNS, HTTPS, HA, UniFi) e confirmado depois com uma nova corrida da
+auditoria. Score subiu de **18/100 (130 achados)** para **22/100 (104 achados)** — a diferença é
+precisamente os achados desta lista:
+
+- **DNS: No Leak Prevention** (Default, CCTV, IOT, Infra sem controlo da porta 53) — resolvido com
+  4 regras **DNAT** (não bloqueio) que redirecionam qualquer consulta DNS externa para o gateway de
+  cada rede, preservando dispositivos com DNS fixo de fábrica (Chromecasts, IoT, câmaras).
+- **DNS: DoT Not Blocked** (porta 853, DNS-over-TLS) — sessão cifrada, não dá para redirecionar
+  como a porta 53, por isso resolvido com **bloqueio** direto (zonas Internal→External e
+  Infrastructure→External).
+- **DNS: DoQ Not Blocked** (DNS-over-QUIC, UDP/853) — mesmo tratamento que o DoT.
+- **DNS: DoH Bypass Not Blocked** (porta 443 para fornecedores públicos de DoH) — bloqueados os IPs
+  dos fornecedores mais usados (Cloudflare, Google, Quad9, OpenDNS, AdGuard); não cobre fornecedores
+  menos comuns por natureza da técnica (indistinguível de HTTPS normal sem inspecionar SNI).
+- **DNS: WAN Mismatch / WAN Not Configured** — WAN1 tinha DNS secundário em Google em vez de
+  Cloudflare; WAN2 não tinha DNS estático nenhum. Ambos corrigidos para Cloudflare (1.1.1.1/1.0.0.1).
+- **Firewall: VLAN Isolation Bypassed** (CRITICAL) — a regra "HA to CCTV" permitia toda a rede
+  Default → CCTV, qualquer porta/protocolo. Restringida a origem para só o IP do Home Assistant.
+- **Firewall: Missing VLAN Isolation** — não havia bloqueio explícito Default→CCTV (a proteção
+  dependia só do deny implícito da zona). Criada regra BLOCK explícita, posicionada depois da
+  ALLOW específica do HA na ordem de avaliação.
+
+Detalhe técnico completo (IDs exatos das regras, payloads, como reverter cada uma) no vault,
+secção `unifi` (`RESOLVIDO_dns_leak_prevention_2026-09-21`, `RESOLVIDO_dot_leak_prevention_2026-09-21`,
+`RESOLVIDO_doh_bypass_e_doq_2026-09-21`, `RESOLVIDO_wan1_dns_mismatch_2026-09-21`,
+`RESOLVIDO_wan2_dns_not_configured_2026-09-21`, `RESOLVIDO_ha_to_cctv_isolamento_2026-09-21`,
+`RESOLVIDO_block_default_to_cctv_2026-09-21`).
+
+## Estado (2026-09-21)
 
 - ✅ LXC criada, Docker instalado, container saudável
 - ✅ Ligado ao UniFi (UDM Pro HOLIVEIRA v10.6.101) com conta local dedicada
 - ✅ InfluxDB configurado (buckets próprios criados pela app)
-- ✅ Auditoria de segurança inicial corrida (score 18/100, 130 achados) — levou a corrigir o
-  isolamento real das VLANs R1-R7 e ativar DNS-over-HTTPS no UniFi (detalhe em
-  [`HO_proxmox-pve`](https://github.com/holiveira84/HO_proxmox-pve) / vault, secção `unifi`)
 - ✅ SSH da gateway ligado — iperf3/Adaptive SQM/WAN speed test desbloqueados
 - ✅ Testes de velocidade LAN (browser OpenSpeedTest + iperf3) ativados e testados com sucesso
-- ✅ Smart Queues (UniFi) ativado — pré-requisito do Adaptive SQM
-- ⏳ Adaptive SQM configurado na UI mas sem deploy (ver secção acima)
+- ✅ Isolamento real das VLANs R1-R7 e DNS-over-HTTPS ativados (2026-09-17)
+- ✅ Família completa de achados DNS + isolamento VLAN Default↔CCTV resolvida e confirmada por
+  re-auditoria (2026-09-21, ver secção acima) — score 18→22/100, achados 130→104
+- ⛔ Smart Queues (UniFi) e Adaptive SQM — testados, depois abandonados (trade-off de throughput
+  não valeu a pena para o utilizador, ver secção acima)
 - ⏳ Modem/ONT não configurado (IP de gestão não encontrado)
 - ⏳ IP ainda em DHCP (192.168.2.224) — decisão de fixar/avançar a sério fica pendente do
   utilizador após explorar o painel
+- ⏳ Resto dos achados "Recommended" do audit (maioritariamente dispositivos IoT/câmara na VLAN
+  errada) — não urgente
